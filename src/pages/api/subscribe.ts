@@ -1,18 +1,56 @@
 /* eslint-disable import/no-anonymous-default-export */
 import { NextApiRequest, NextApiResponse } from 'next';
-import { getSession, session } from 'next-auth/client';
+import { getSession } from 'next-auth/client';
 import { stripe } from '../../services/stripe';
+
+import { query as q } from 'faunadb';
+import { fauna } from '../../services/fauna';
+
+type User = {
+    ref: {
+        id: string;
+    }
+    data: { 
+        stripe_customer_id: string; 
+    }
+}
 
 export default async (request: NextApiRequest, response: NextApiResponse)=>{
     if(request.method === 'POST'){ //Só aceita metodo post
         const sessions = await getSession({req: request}); //Pega o usuario logado
         
-        const stripeCustomer = await stripe.customers.create({ //Cria um customer no stripe
-            email: sessions.user.email,
-        });
+        const user = await fauna.query<User>( //Query que busca um usuario no fauna pelo email
+            q.Get(
+                q.Match(
+                    q.Index('user_by_email'),
+                q.Casefold(sessions.user.email)
+                )
+            )
+        )
+
+        let customerId = user.data.stripe_customer_id;
+
+
+        if(!customerId){
+            const stripeCustomer = await stripe.customers.create({ //Cria um customer no stripe
+                email: sessions.user.email,
+            });
+            await fauna.query(
+            q.Update(
+                q.Ref(q.Collection('users'), user.ref.id), //Referencia do usuario
+                    { //Quais dados quer alterar?
+                        data:{ 
+                            stripe_customer_id: stripeCustomer.id,
+                        }
+                    }
+                )
+            );
+
+            customerId = stripeCustomer.id;
+        }
 
         const stripeCheckoutSession = await stripe.checkout.sessions.create({
-            customer: stripeCustomer.id,  //id do cliente
+            customer: customerId,  //id do cliente
             payment_method_types: ['card'],
             billing_address_collection: 'required', //endereço do entrega é obrigatório?
             line_items: [ //Itens colocados no carrinho
