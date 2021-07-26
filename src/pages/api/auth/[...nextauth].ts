@@ -18,9 +18,26 @@ export default NextAuth({
 
             try {
                 await fauna.query(
-                    q.Create(q.Collection("users"), {
-                      data: { email },
-                    })
+                    q.If( //Faz uma verificação if obviamente
+                        q.Not( //Verificação negativa
+                            q.Exists( //Verific se existe
+                                q.Match( // significa que vai buscar um baseado em uma query
+                                    q.Index('user_by_email'), //query que deve ser usada
+                                    q.Casefold(user.email) //deve comparar com isso nas collections
+                                ),
+                            )   
+                        ),
+                        q.Create(
+                            q.Collection('users'),
+                            { data: { email }}
+                        ),
+                        q.Get( //Caso exista ele vai dar um get nesse usuario
+                            q.Match(
+                                q.Index('user_by_email'),
+                                q.Casefold(user.email) 
+                            )
+                        )
+                    )
                 );
                 return true;
             } catch (error) {
